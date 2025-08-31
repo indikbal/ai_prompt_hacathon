@@ -67,14 +67,22 @@ export default function ChatPage() {
       ))
 
       // Step 2: Send enhanced prompt to chat API
+      const chatHistory = [...messages].map(msg => ({
+        role: msg.role,
+        content: msg.role === 'user' && msg.enhancedPrompt ? msg.enhancedPrompt : msg.content
+      }))
+      
+      // Add the current enhanced prompt to history
+      chatHistory.push({
+        role: 'user',
+        content: enhancedPrompt
+      })
+
       const chatResponse = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
-          messages: [...messages, userMessage].map(msg => ({
-            role: msg.role,
-            content: msg.role === 'user' && msg.enhancedPrompt ? msg.enhancedPrompt : msg.content
-          })),
+          messages: chatHistory,
           enhancedPrompt
         }),
       })

@@ -26,6 +26,7 @@ export default function VoiceInput({ onTranscript, isDisabled = false }: VoiceIn
       recognition.continuous = true
       recognition.interimResults = true
       recognition.lang = 'en-US'
+      recognition.maxAlternatives = 1
 
       recognition.onstart = () => {
         setIsListening(true)
@@ -38,28 +39,65 @@ export default function VoiceInput({ onTranscript, isDisabled = false }: VoiceIn
         for (let i = event.resultIndex; i < event.results.length; i++) {
           const transcriptPart = event.results[i][0].transcript
           if (event.results[i].isFinal) {
-            finalTranscript += transcriptPart
+            finalTranscript += transcriptPart + ' '
           } else {
             interimTranscript += transcriptPart
           }
         }
 
-        setTranscript(prev => prev + finalTranscript)
+        // Only append new final transcript, don't replace existing
+        if (finalTranscript) {
+          setTranscript(prev => prev + finalTranscript)
+        }
         setInterimTranscript(interimTranscript)
 
-        if (finalTranscript) {
-          onTranscript(transcript + finalTranscript)
-        }
+        // Always update the parent with the complete transcript
+        const completeText = transcript + finalTranscript + interimTranscript
+        onTranscript(completeText)
       }
 
       recognition.onerror = (event: any) => {
         console.error('Speech recognition error:', event.error)
-        setIsListening(false)
+        // Don't stop on network errors, try to restart
+        if (event.error === 'network' || event.error === 'no-speech') {
+          // Restart recognition if it was supposed to be listening
+          if (isListening) {
+            setTimeout(() => {
+              if (recognitionRef.current && isListening) {
+                try {
+                  recognitionRef.current.start()
+                } catch (e) {
+                  console.log('Recognition restart failed:', e)
+                }
+              }
+            }, 1000)
+          }
+        } else {
+          setIsListening(false)
+        }
       }
 
       recognition.onend = () => {
-        setIsListening(false)
-        setInterimTranscript('')
+        // Auto-restart if user hasn't manually stopped
+        if (isListening) {
+          setTimeout(() => {
+            if (recognitionRef.current && isListening) {
+              try {
+                // Don't clear transcript on auto-restart, just restart recognition
+                recognitionRef.current.start()
+              } catch (e) {
+                console.log('Recognition restart failed:', e)
+                setIsListening(false)
+              }
+            }
+          }, 100)
+        } else {
+          // When manually stopped, send final transcript to parent
+          setInterimTranscript('')
+          if (transcript) {
+            onTranscript(transcript)
+          }
+        }
       }
 
       recognitionRef.current = recognition
@@ -70,10 +108,11 @@ export default function VoiceInput({ onTranscript, isDisabled = false }: VoiceIn
         recognitionRef.current.stop()
       }
     }
-  }, [transcript, onTranscript])
+  }, [transcript, onTranscript, isListening])
 
   const startListening = () => {
     if (recognitionRef.current && !isListening) {
+      // Only clear transcript when user manually starts (not on auto-restart)
       setTranscript('')
       setInterimTranscript('')
       recognitionRef.current.start()
@@ -82,7 +121,13 @@ export default function VoiceInput({ onTranscript, isDisabled = false }: VoiceIn
 
   const stopListening = () => {
     if (recognitionRef.current && isListening) {
+      setIsListening(false) // Set this first to prevent auto-restart
       recognitionRef.current.stop()
+      // Immediately send the complete transcript when stopping
+      const completeTranscript = transcript + interimTranscript
+      if (completeTranscript.trim()) {
+        onTranscript(completeTranscript.trim())
+      }
     }
   }
 
